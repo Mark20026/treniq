@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Alapértelmezett rendszerváltozók - csak a legszükségesebbek a böngészőnek */
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+  }
+
+  * {
+    @apply border-slate-200; /* Alapértelmezett szegélyszín mindenhez */
+  }
+
+  body {
+    /* Ez adja meg a profi SaaS alaphangulatot: világos háttér, tiszta szöveg */
+    @apply bg-slate-50 text-slate-900 antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+@layer components {
+  /* Itt hozhatsz létre saját, újrahasználható osztályokat, ha akarsz */
+
+  .saas-card {
+    @apply bg-white border border-slate-200 shadow-sm rounded-xl overflow-hidden;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-2 bg-white border border-slate-200 rounded-lg
+           focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500
+           transition-all duration-200 placeholder:text-slate-400;
+  }
+}
+
+@layer utilities {
+  /* Extra finomítások a vizuális élményhez */
+  .glass {
+    @apply bg-white/80 backdrop-blur-md border border-white/20;
+  }
+
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-violet-600;
+  }
+}
+
+/* Scrollbar testreszabása, hogy ne az elavult Windows/Mac stílus legyen */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
+}

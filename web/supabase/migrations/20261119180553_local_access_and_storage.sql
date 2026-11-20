@@ -1,0 +1,73 @@
+-- Permissions and private local storage for the core applications.
+SET search_path = public, extensions;
+DO $$ DECLARE p record; BEGIN
+  FOR p IN SELECT schemaname, tablename, policyname FROM pg_policies
+    WHERE schemaname = 'public' OR (schemaname = 'storage' AND tablename = 'objects')
+  LOOP EXECUTE format('DROP POLICY %I ON %I.%I', p.policyname, p.schemaname, p.tablename); END LOOP;
+END $$;
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated;
+CREATE POLICY "Read own or assigned coach profile" ON public.coach_profiles FOR SELECT TO authenticated USING (id = (select auth.uid()) OR EXISTS (SELECT 1 FROM public.clients c WHERE c.id = (select auth.uid()) AND c.coach_id = coach_profiles.id));
+CREATE POLICY "Insert own coach profile" ON public.coach_profiles FOR INSERT TO authenticated WITH CHECK (id = (select auth.uid()) AND NOT EXISTS (SELECT 1 FROM public.clients c WHERE c.id = (select auth.uid())));
+CREATE POLICY "Update own coach profile" ON public.coach_profiles FOR UPDATE TO authenticated USING (id = (select auth.uid())) WITH CHECK (id = (select auth.uid()));
+CREATE POLICY "Read client relationship" ON public.clients FOR SELECT TO authenticated USING (id = (select auth.uid()) OR coach_id = (select auth.uid()));
+CREATE POLICY "Manage assigned clients" ON public.clients FOR ALL TO authenticated USING (coach_id = (select auth.uid())) WITH CHECK (coach_id = (select auth.uid()));
+CREATE POLICY "Client can update own profile" ON public.clients FOR UPDATE TO authenticated USING (id = (select auth.uid())) WITH CHECK (id = (select auth.uid()));
+CREATE FUNCTION public.keep_client_owner() RETURNS trigger LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+BEGIN IF NEW.coach_id IS DISTINCT FROM OLD.coach_id OR NEW.id IS DISTINCT FROM OLD.id THEN RAISE EXCEPTION 'Client ownership cannot be changed'; END IF; RETURN NEW; END $$;
+CREATE TRIGGER keep_client_owner BEFORE UPDATE ON public.clients FOR EACH ROW EXECUTE FUNCTION public.keep_client_owner();
+CREATE POLICY "Read assigned records" ON public.appointments FOR SELECT TO authenticated USING (client_id = (select auth.uid()) OR coach_id = (select auth.uid()));
+CREATE POLICY "Coach manages assigned records" ON public.appointments FOR ALL TO authenticated USING (coach_id = (select auth.uid())) WITH CHECK (coach_id = (select auth.uid()) AND EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND c.coach_id = (select auth.uid())));
+CREATE POLICY "Read assigned records" ON public.client_files FOR SELECT TO authenticated USING (client_id = (select auth.uid()) OR coach_id = (select auth.uid()));
+CREATE POLICY "Coach manages assigned records" ON public.client_files FOR ALL TO authenticated USING (coach_id = (select auth.uid())) WITH CHECK (coach_id = (select auth.uid()) AND EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND c.coach_id = (select auth.uid())));
+CREATE POLICY "Read assigned records" ON public.meal_plans FOR SELECT TO authenticated USING (client_id = (select auth.uid()) OR coach_id = (select auth.uid()));
+CREATE POLICY "Coach manages assigned records" ON public.meal_plans FOR ALL TO authenticated USING (coach_id = (select auth.uid())) WITH CHECK (coach_id = (select auth.uid()) AND EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND c.coach_id = (select auth.uid())));
+CREATE POLICY "Read assigned records" ON public.workout_plans FOR SELECT TO authenticated USING (client_id = (select auth.uid()) OR coach_id = (select auth.uid()));
+CREATE POLICY "Coach manages assigned records" ON public.workout_plans FOR ALL TO authenticated USING (coach_id = (select auth.uid())) WITH CHECK (coach_id = (select auth.uid()) AND EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND c.coach_id = (select auth.uid())));
+CREATE POLICY "Client updates own appointments" ON public.appointments FOR UPDATE TO authenticated USING (client_id = (select auth.uid())) WITH CHECK (client_id = (select auth.uid()) AND EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND (c.id = (select auth.uid()) OR c.coach_id = (select auth.uid()))));
+CREATE POLICY "Client uploads own files" ON public.client_files FOR INSERT TO authenticated WITH CHECK (client_id = (select auth.uid()) AND EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND (c.id = (select auth.uid()) OR c.coach_id = (select auth.uid()))) AND coach_id = (SELECT c.coach_id FROM public.clients c WHERE c.id = client_id));
+CREATE POLICY "Client deletes own files" ON public.client_files FOR DELETE TO authenticated USING (client_id = (select auth.uid()) AND uploaded_by = 'client');
+CREATE POLICY "Read client records" ON public.measurements FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND (c.id = (select auth.uid()) OR c.coach_id = (select auth.uid()))));
+CREATE POLICY "Coach manages client records" ON public.measurements FOR ALL TO authenticated USING (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND c.coach_id = (select auth.uid()))) WITH CHECK (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND c.coach_id = (select auth.uid())));
+CREATE POLICY "Client manages own records" ON public.measurements FOR ALL TO authenticated USING (client_id = (select auth.uid())) WITH CHECK (client_id = (select auth.uid()));
+CREATE POLICY "Read client records" ON public.progress_photos FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND (c.id = (select auth.uid()) OR c.coach_id = (select auth.uid()))));
+CREATE POLICY "Coach manages client records" ON public.progress_photos FOR ALL TO authenticated USING (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND c.coach_id = (select auth.uid()))) WITH CHECK (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND c.coach_id = (select auth.uid())));
+CREATE POLICY "Client manages own records" ON public.progress_photos FOR ALL TO authenticated USING (client_id = (select auth.uid())) WITH CHECK (client_id = (select auth.uid()));
+CREATE POLICY "Read client records" ON public.memberships FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND (c.id = (select auth.uid()) OR c.coach_id = (select auth.uid()))));
+CREATE POLICY "Coach manages client records" ON public.memberships FOR ALL TO authenticated USING (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND c.coach_id = (select auth.uid()))) WITH CHECK (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND c.coach_id = (select auth.uid())));
+CREATE POLICY "Manage own devices" ON public.client_devices FOR ALL TO authenticated USING (client_id = (select auth.uid())) WITH CHECK (client_id = (select auth.uid()));
+CREATE POLICY "Read own subscriptions" ON public.coach_subscriptions FOR SELECT TO authenticated USING (coach_id = (select auth.uid()));
+CREATE POLICY "Read own or public templates" ON public.meal_plan_templates FOR SELECT TO authenticated USING (coach_id = (select auth.uid()) OR is_public);
+CREATE POLICY "Manage own templates" ON public.meal_plan_templates FOR ALL TO authenticated USING (coach_id = (select auth.uid())) WITH CHECK (coach_id = (select auth.uid()));
+CREATE POLICY "Read exercise catalog" ON public.master_exercises FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Read assigned plan children" ON public.exercises FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM public.workout_plans p WHERE p.id = workout_plan_id));
+CREATE POLICY "Coach manages plan children" ON public.exercises FOR ALL TO authenticated USING (EXISTS (SELECT 1 FROM public.workout_plans p WHERE p.id = workout_plan_id AND p.coach_id = (select auth.uid()))) WITH CHECK (EXISTS (SELECT 1 FROM public.workout_plans p WHERE p.id = workout_plan_id AND p.coach_id = (select auth.uid())));
+CREATE POLICY "Read assigned plan children" ON public.daily_meal_entries FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM public.meal_plans p WHERE p.id = meal_plan_id));
+CREATE POLICY "Coach manages plan children" ON public.daily_meal_entries FOR ALL TO authenticated USING (EXISTS (SELECT 1 FROM public.meal_plans p WHERE p.id = meal_plan_id AND p.coach_id = (select auth.uid()))) WITH CHECK (EXISTS (SELECT 1 FROM public.meal_plans p WHERE p.id = meal_plan_id AND p.coach_id = (select auth.uid())));
+CREATE POLICY "Read client workout records" ON public.workout_logs FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND (c.id = (select auth.uid()) OR c.coach_id = (select auth.uid()))));
+CREATE POLICY "Manage owned workout records" ON public.workout_logs FOR ALL TO authenticated USING (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND (c.id = (select auth.uid()) OR c.coach_id = (select auth.uid()))) AND EXISTS (SELECT 1 FROM public.workout_plans p WHERE p.id = workout_plan_id AND p.client_id = workout_logs.client_id)) WITH CHECK (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND (c.id = (select auth.uid()) OR c.coach_id = (select auth.uid()))) AND EXISTS (SELECT 1 FROM public.workout_plans p WHERE p.id = workout_plan_id AND p.client_id = workout_logs.client_id));
+CREATE POLICY "Read client workout records" ON public.exercise_logs FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND (c.id = (select auth.uid()) OR c.coach_id = (select auth.uid()))));
+CREATE POLICY "Manage owned workout records" ON public.exercise_logs FOR ALL TO authenticated USING (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND (c.id = (select auth.uid()) OR c.coach_id = (select auth.uid()))) AND EXISTS (SELECT 1 FROM public.workout_plans p WHERE p.id = workout_plan_id AND p.client_id = exercise_logs.client_id)) WITH CHECK (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_id AND (c.id = (select auth.uid()) OR c.coach_id = (select auth.uid()))) AND EXISTS (SELECT 1 FROM public.workout_plans p WHERE p.id = workout_plan_id AND p.client_id = exercise_logs.client_id));
+CREATE POLICY "Manage owned workout children" ON public.workout_log_exercises FOR ALL TO authenticated USING (EXISTS (SELECT 1 FROM public.workout_logs l WHERE l.id = workout_log_id)) WITH CHECK (EXISTS (SELECT 1 FROM public.workout_logs l WHERE l.id = workout_log_id));
+CREATE POLICY "Read own conversation" ON public.messages FOR SELECT TO authenticated USING (sender_id = (select auth.uid()) OR receiver_id = (select auth.uid()));
+CREATE POLICY "Send to assigned participant" ON public.messages FOR INSERT TO authenticated WITH CHECK (sender_id = (select auth.uid()) AND EXISTS (SELECT 1 FROM public.clients c WHERE (c.id = sender_id AND c.coach_id = receiver_id) OR (c.coach_id = sender_id AND c.id = receiver_id)));
+CREATE POLICY "Update own conversation" ON public.messages FOR UPDATE TO authenticated USING (sender_id = (select auth.uid()) OR receiver_id = (select auth.uid())) WITH CHECK (sender_id = (select auth.uid()) OR receiver_id = (select auth.uid()));
+CREATE FUNCTION public.keep_message_participants() RETURNS trigger LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+BEGIN IF NEW.sender_id IS DISTINCT FROM OLD.sender_id OR NEW.receiver_id IS DISTINCT FROM OLD.receiver_id THEN RAISE EXCEPTION 'Message participants cannot be changed'; END IF; RETURN NEW; END $$;
+CREATE TRIGGER keep_message_participants BEFORE UPDATE ON public.messages FOR EACH ROW EXECUTE FUNCTION public.keep_message_participants();
+CREATE POLICY "Read own notifications" ON public.notifications FOR SELECT TO authenticated USING (user_id = (select auth.uid()));
+CREATE POLICY "Update own notifications" ON public.notifications FOR UPDATE TO authenticated USING (user_id = (select auth.uid())) WITH CHECK (user_id = (select auth.uid()));
+CREATE POLICY "Delete own notifications" ON public.notifications FOR DELETE TO authenticated USING (user_id = (select auth.uid()));
+CREATE POLICY "Insert own notifications" ON public.notifications FOR INSERT TO authenticated WITH CHECK (user_id = (select auth.uid()));
+ALTER FUNCTION public.notify_new_appointment() SECURITY DEFINER;
+ALTER FUNCTION public.notify_new_appointment() SET search_path = public, pg_temp;
+ALTER FUNCTION public.notify_new_message() SECURITY DEFINER;
+ALTER FUNCTION public.notify_new_message() SET search_path = public, pg_temp;
+ALTER FUNCTION public.sync_coach_email() SET search_path = public, pg_temp;
+ALTER FUNCTION public.sync_membership_coach_id() SET search_path = public, pg_temp;
+REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, anon, authenticated;
+INSERT INTO storage.buckets(id, name, public) VALUES ('client-files', 'client-files', false), ('chat-voice', 'chat-voice', false) ON CONFLICT (id) DO NOTHING;
+CREATE POLICY "Upload to own client folders" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'client-files' AND (storage.foldername(name))[1] = (select auth.uid())::text AND EXISTS (SELECT 1 FROM public.clients c WHERE (c.id::text = (storage.foldername(name))[1] AND c.coach_id::text = (storage.foldername(name))[2]) OR (c.coach_id::text = (storage.foldername(name))[1] AND c.id::text = (storage.foldername(name))[2])));
+CREATE POLICY "Read related client files" ON storage.objects FOR SELECT TO authenticated USING (bucket_id = 'client-files' AND EXISTS (SELECT 1 FROM public.clients c WHERE (c.id = (select auth.uid()) OR c.coach_id = (select auth.uid())) AND ((c.id::text = (storage.foldername(name))[1] AND c.coach_id::text = (storage.foldername(name))[2]) OR (c.coach_id::text = (storage.foldername(name))[1] AND c.id::text = (storage.foldername(name))[2]))));
+CREATE POLICY "Delete uploaded client files" ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'client-files' AND (storage.foldername(name))[1] = (select auth.uid())::text);
